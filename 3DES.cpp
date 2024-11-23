@@ -247,9 +247,9 @@ public:
 
 int main() {
     char mode, type;
-    std::cout << "Enter mode (e/d): ";
+    std::cout << "Encrypt or Decrypt? (e/d): ";
     std::cin >> mode;
-    std::cout << "Enter type (t/f): ";
+    std::cout << "Text or File? (t/f): ";
     std::cin >> type;
     std::cin.ignore(); // Clear the newline
 
