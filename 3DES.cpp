@@ -1,18 +1,11 @@
 #include <iostream>
-#include <fstream>
 #include <string>
 #include <vector>
-#include <iomanip>
-#include <sstream>
+#include <cstdint>
+#include <ctime>
 #include <random>
-
-// Forward declaration of applyPermutation
-std::string applyPermutation(const std::string &data, const int *table, int tableSize);
-
-// Hardcoded keys for 3DES
-const std::string key1 = "12345678"; // 8 bytes
-const std::string key2 = "23456789"; // 8 bytes
-const std::string key3 = "34567890"; // 8 bytes
+#include <stdexcept>
+#include <iomanip>
 
 // DES tables
 const int IP[64] = {
@@ -145,254 +138,317 @@ const int P[32] = {
     22, 11, 4, 25
 };
 
-// Function to convert string to hex
-std::string toHex(const std::string &input) {
-    std::ostringstream oss;
-    for (unsigned char c : input) {
-        oss << std::hex << std::setw(2) << std::setfill('0') << static_cast<int>(c);
-    }
-    return oss.str();
-}
+class DES {
+private:
+    std::vector<uint64_t> subkeys;
 
-// Function to convert hex to string
-std::string fromHex(const std::string &input) {
-    std::string output;
-    for (size_t i = 0; i < input.length(); i += 2) {
-        std::string byteString = input.substr(i, 2);
-        char byte = static_cast<char>(strtol(byteString.c_str(), nullptr, 16));
-        output += byte;
-    }
-    return output;
-}
-
-// Function to generate a random IV
-std::string generateIV(size_t length) {
-    std::string iv;
-    std::random_device rd;
-    std::mt19937 gen(rd());
-    std::uniform_int_distribution<> dis(0, 255);
-    for (size_t i = 0; i < length; ++i) {
-        iv += static_cast<char>(dis(gen));
-    }
-    return iv;
-}
-
-// Placeholder for DES encryption function
-std::string DES_encrypt(const std::string &data, const std::string &key) {
-    // Apply initial permutation
-    std::string permutedData = applyPermutation(data, IP, 64);
-
-    // Split into left and right halves
-    std::string left = permutedData.substr(0, 4);
-    std::string right = permutedData.substr(4, 4);
-
-    // Generate subkeys
-    std::vector<std::string> subkeys = generateSubkeys(key);
-
-    // 16 rounds of processing
-    for (int i = 0; i < 16; ++i) {
-        std::string expandedRight = applyExpansion(right, E);
-        std::string xored = xorStrings(expandedRight, subkeys[i]);
-        std::string substituted = applySBoxes(xored);
-        std::string permuted = applyPermutation(substituted, P, 32);
-        std::string newRight = xorStrings(left, permuted);
-        left = right;
-        right = newRight;
+    uint64_t initialPermutation(uint64_t block) {
+        uint64_t result = 0;
+        for (int i = 0; i < 64; i++) {
+            result |= ((block >> (64 - IP[i])) & 0x01) << (63 - i);
+        }
+        return result;
     }
 
-    // Combine and apply final permutation
-    std::string combined = right + left;
-    return applyPermutation(combined, IP_INV, 64);
+    uint64_t finalPermutation(uint64_t block) {
+        uint64_t result = 0;
+        for (int i = 0; i < 64; i++) {
+            result |= ((block >> (64 - IP_INV[i])) & 0x01) << (63 - i);
+        }
+        return result;
+    }
+
+    uint32_t f(uint32_t R, uint64_t k) {
+        // Expansion
+        uint64_t expanded = 0;
+        for (int i = 0; i < 48; i++) {
+            expanded |= ((R >> (32 - E[i])) & 0x01) << (47 - i);
+        }
+        
+        // XOR with key
+        expanded ^= k;
+
+        // S-box substitution
+        uint32_t output = 0;
+        for (int i = 0; i < 8; i++) {
+            int row = ((expanded >> (47 - 6*i)) & 0x20) | ((expanded >> (47 - 6*i - 5)) & 0x01);
+            int col = (expanded >> (47 - 6*i - 4)) & 0x0F;
+            output |= (uint32_t)S_BOX[i][row][col] << (28 - 4*i);
+        }
+
+        // Permutation
+        uint32_t result = 0;
+        for (int i = 0; i < 32; i++) {
+            result |= ((output >> (32 - P[i])) & 0x01) << (31 - i);
+        }
+
+        return result;
+    }
+
+    void generateSubkeys(uint64_t key) {
+        // Initial key permutation
+        uint64_t permuted_key = 0;
+        for (int i = 0; i < 56; i++) {
+            permuted_key |= ((key >> (64 - PC1[i])) & 0x01) << (55 - i);
+        }
+
+        uint32_t C = permuted_key >> 28;
+        uint32_t D = permuted_key & 0x0FFFFFFF;
+
+        subkeys.resize(16);
+        
+        for (int i = 0; i < 16; i++) {
+            // Rotate left
+            C = ((C << SHIFTS[i]) | (C >> (28 - SHIFTS[i]))) & 0x0FFFFFFF;
+            D = ((D << SHIFTS[i]) | (D >> (28 - SHIFTS[i]))) & 0x0FFFFFFF;
+
+            // Combine and permute
+            uint64_t combined = ((uint64_t)C << 28) | D;
+            uint64_t subkey = 0;
+
+            for (int j = 0; j < 48; j++) {
+                subkey |= ((combined >> (56 - PC2[j])) & 0x01) << (47 - j);
+            }
+
+            subkeys[i] = subkey;
+        }
+    }
+
+public:
+    DES(uint64_t key) {
+        generateSubkeys(key);
+    }
+
+    uint64_t encrypt(uint64_t block) {
+        block = initialPermutation(block);
+        
+        uint32_t left = block >> 32;
+        uint32_t right = block & 0xFFFFFFFF;
+
+        for (int i = 0; i < 16; i++) {
+            uint32_t temp = right;
+            right = left ^ f(right, subkeys[i]);
+            left = temp;
+        }
+
+        uint64_t result = ((uint64_t)right << 32) | left;
+        return finalPermutation(result);
+    }
+
+    uint64_t decrypt(uint64_t block) {
+        block = initialPermutation(block);
+        
+        uint32_t left = block >> 32;
+        uint32_t right = block & 0xFFFFFFFF;
+
+        for (int i = 15; i >= 0; i--) {
+            uint32_t temp = left;
+            left = right ^ f(left, subkeys[i]);
+            right = temp;
+        }
+
+        uint64_t result = ((uint64_t)left << 32) | right;
+        return finalPermutation(result);
+    }
+};
+
+class TripleDES {
+private:
+    DES des1, des2, des3;
+
+public:
+    TripleDES(uint64_t key1, uint64_t key2, uint64_t key3) 
+        : des1(key1), des2(key2), des3(key3) {}
+
+    uint64_t encrypt(uint64_t block) {
+        return des3.encrypt(des2.decrypt(des1.encrypt(block)));
+    }
+
+    uint64_t decrypt(uint64_t block) {
+        return des1.decrypt(des2.encrypt(des3.decrypt(block)));
+    }
+};
+
+std::string removePadding(const std::string& str) {
+    size_t paddingSize = static_cast<size_t>(str.back());
+    std::cout << "Detected padding size: " << paddingSize << std::endl;
+    if (paddingSize > 8 || paddingSize == 0) {
+        throw std::runtime_error("Invalid padding detected");
+    }
+    for (size_t i = 0; i < paddingSize; i++) {
+        if (str[str.size() - 1 - i] != paddingSize) {
+            std::cout << "Padding error at position " << i << ": expected " << paddingSize
+                      << ", got " << static_cast<size_t>(str[str.size() - 1 - i]) << std::endl;
+            throw std::runtime_error("Invalid padding detected");
+        }
+    }
+    return str.substr(0, str.size() - paddingSize);
 }
 
-// Placeholder for DES decryption function
-std::string DES_decrypt(const std::string &data, const std::string &key) {
-    // Similar to DES_encrypt but with subkeys applied in reverse order
-}
-
-// XOR two strings
-std::string xorStrings(const std::string &a, const std::string &b) {
-    std::string result;
-    for (size_t i = 0; i < a.size(); ++i) {
-        result += a[i] ^ b[i];
+uint64_t hexToUint64(const std::string& hex) {
+    uint64_t result = 0;
+    for (char c : hex) {
+        result = (result << 4) | (c >= 'a' ? c - 'a' + 10 : c >= 'A' ? c - 'A' + 10 : c - '0');
     }
     return result;
 }
 
-// Triple DES encryption with CBC mode
-std::string tripleDES_encrypt(const std::string &data, const std::string &iv) {
-    std::string previousBlock = iv;
-    std::string encryptedData;
-    for (size_t i = 0; i < data.size(); i += 8) {
-        std::string block = data.substr(i, 8);
-        block = xorStrings(block, previousBlock);
-        block = DES_encrypt(block, key1);
-        block = DES_decrypt(block, key2);
-        block = DES_encrypt(block, key3);
-        encryptedData += block;
-        previousBlock = block;
-    }
-    return encryptedData;
+std::string uint64ToHex(uint64_t value) {
+    std::ostringstream oss;
+    oss << std::hex << std::setw(16) << std::setfill('0') << value;
+    return oss.str();
 }
 
-// Triple DES decryption with CBC mode
-std::string tripleDES_decrypt(const std::string &data, const std::string &iv) {
-    std::string previousBlock = iv;
-    std::string decryptedData;
-    for (size_t i = 0; i < data.size(); i += 8) {
-        std::string block = data.substr(i, 8);
-        std::string decryptedBlock = DES_decrypt(block, key3);
-        decryptedBlock = DES_encrypt(decryptedBlock, key2);
-        decryptedBlock = DES_decrypt(decryptedBlock, key1);
-        decryptedBlock = xorStrings(decryptedBlock, previousBlock);
-        decryptedData += decryptedBlock;
-        previousBlock = block;
-    }
-    return decryptedData;
-}
-
-// Function to handle text input
-void processText(bool encrypt) {
-    std::string input;
-    std::cout << "Enter text: ";
-    std::cin.ignore();
-    std::getline(std::cin, input);
-
-    if (encrypt) {
-        std::string iv = generateIV(8); // 8 bytes for DES
-        std::string encrypted = tripleDES_encrypt(input, iv);
-        std::cout << "IV (hex): " << toHex(iv) << std::endl;
-        std::cout << "Encrypted text (hex): " << toHex(encrypted) << std::endl;
-    } else {
-        std::string ivHex;
-        std::cout << "Enter IV (hex): ";
-        std::cin >> ivHex;
-        std::string iv = fromHex(ivHex);
-        std::string decrypted = tripleDES_decrypt(fromHex(input), iv);
-        std::cout << "Decrypted text: " << decrypted << std::endl;
-    }
-}
-
-// Function to handle file input
-void processFile(bool encrypt) {
-    std::string filename;
-    std::cout << "Enter filename: ";
-    std::cin >> filename;
-
-    std::ifstream file(filename, std::ios::binary);
-    if (!file.is_open()) {
-        std::cerr << "Error opening file!" << std::endl;
-        return;
-    }
-
-    std::string data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-    file.close();
-
-    if (encrypt) {
-        std::string iv = generateIV(8); // 8 bytes for DES
-        std::string encrypted = tripleDES_encrypt(data, iv);
-        std::cout << "IV (hex): " << toHex(iv) << std::endl;
-        std::cout << "Encrypted file content (hex): " << toHex(encrypted) << std::endl;
-
-        // Save encrypted data to a new file
-        std::ofstream outFile("encrypted_file.txt", std::ios::binary);
-        if (outFile.is_open()) {
-            std::string combinedHex = toHex(iv) + toHex(encrypted);
-            outFile.write(combinedHex.c_str(), combinedHex.size()); // Write as binary
-            outFile.close();
-            std::cout << "Encrypted data saved to encrypted_file.txt" << std::endl;
-        } else {
-            std::cerr << "Error creating output file!" << std::endl;
-        }
-    } else {
-        std::string ivHex;
-        std::cout << "Enter IV (hex): ";
-        std::cin >> ivHex;
-        std::string iv = fromHex(ivHex);
-
-        // Read the entire file content as a single string
-        std::ifstream inFile("encrypted_file.txt", std::ios::binary);
-        std::string fileContent((std::istreambuf_iterator<char>(inFile)), std::istreambuf_iterator<char>());
-        inFile.close();
-
-        // Extract the encrypted data from the file content
-        std::string encryptedHex = fileContent.substr(ivHex.length());
-        std::string decrypted = tripleDES_decrypt(fromHex(encryptedHex), iv);
-        std::cout << "Decrypted file content: " << decrypted << std::endl;
-    }
-}
-
-// Function to apply a permutation table to a string
-std::string applyPermutation(const std::string &data, const int *table, int tableSize) {
-    std::string permutedData;
-    for (int i = 0; i < tableSize; ++i) {
-        permutedData += data[table[i] - 1];
-    }
-    return permutedData;
-}
-
-// Function to generate 16 subkeys from the main key
-std::vector<std::string> generateSubkeys(const std::string &key) {
-    std::vector<std::string> subkeys;
-    std::string permutedKey = applyPermutation(key, PC1, 56);
-
-    std::string left = permutedKey.substr(0, 28);
-    std::string right = permutedKey.substr(28, 28);
-
-    for (int i = 0; i < 16; ++i) {
-        // Perform left circular shifts
-        left = leftShift(left, SHIFTS[i]);
-        right = leftShift(right, SHIFTS[i]);
-
-        // Combine halves and apply PC2 permutation
-        std::string combined = left + right;
-        subkeys.push_back(applyPermutation(combined, PC2, 48));
-    }
-
-    return subkeys;
-}
-
-// Function to perform left circular shift
-std::string leftShift(const std::string &input, int shifts) {
-    return input.substr(shifts) + input.substr(0, shifts);
-}
-
-// Function to apply the expansion table to a string
-std::string applyExpansion(const std::string &data, const int *expansionTable) {
-    std::string expandedData;
-    for (int i = 0; i < 48; ++i) { // Assuming the expansion table size is 48
-        expandedData += data[expansionTable[i] - 1];
-    }
-    return expandedData;
-}
-
-// Function to apply S-Boxes to a 48-bit input
-std::string applySBoxes(const std::string &input) {
-    std::string output;
-    for (int i = 0; i < 8; ++i) {
-        std::string sixBits = input.substr(i * 6, 6);
-        int row = (sixBits[0] - '0') * 2 + (sixBits[5] - '0');
-        int col = (sixBits[1] - '0') * 8 + (sixBits[2] - '0') * 4 + (sixBits[3] - '0') * 2 + (sixBits[4] - '0');
-        int sBoxValue = S_BOX[i][row][col];
-        output += static_cast<char>(sBoxValue);
-    }
-    return output;
+std::string padData(const std::string &data) {
+    size_t blockSize = 8; // DES block size
+    size_t paddingSize = blockSize - (data.size() % blockSize);
+    std::string paddedData = data;
+    paddedData.append(paddingSize, static_cast<char>(paddingSize));
+    return paddedData;
 }
 
 int main() {
-    char choice, type;
+    char mode, type;
     std::cout << "Enter 'e' to encrypt or 'd' to decrypt: ";
-    std::cin >> choice;
+    std::cin >> mode;
     std::cout << "Enter 't' for text or 'f' for file: ";
     std::cin >> type;
+    std::cin.ignore(); // Clear the newline
 
-    bool encrypt = (choice == 'e');
     if (type == 't') {
-        processText(encrypt);
+        // Hardcoded keys for testing
+        uint64_t key1 = 0x133457799BBCDFF1;
+        uint64_t key2 = 0x233457799BBCDFF2;
+        uint64_t key3 = 0x333457799BBCDFF3;
+        
+        TripleDES tdes(key1, key2, key3);
+
+        if (mode == 'e') {
+            // Generate IV using time as seed
+            srand(time(NULL));
+            uint64_t iv = (uint64_t)rand() << 32 | rand();
+            for(int i = 0; i < 8; i++) {
+                iv = (iv << 8) | (rand() % 256);
+            }
+
+            std::string input;
+            std::cout << "Enter text: ";
+            std::getline(std::cin, input);
+
+            // Pad input to multiple of 8 bytes
+            std::string paddedInput = padData(input);
+
+            // Output IV in hex
+            std::cout << "IV (hex): " << uint64ToHex(iv) << std::endl;
+
+            std::cout << "Encrypted text (hex): ";
+            uint64_t previous_block = iv;
+
+            // Process each 8-byte block
+            for (size_t pos = 0; pos < paddedInput.length(); pos += 8) {
+                uint64_t block = 0;
+                for (int i = 0; i < 8; i++) {
+                    block = (block << 8) | static_cast<unsigned char>(paddedInput[pos + i]);
+                }
+
+                block ^= previous_block;  // CBC mode
+                uint64_t encrypted = tdes.encrypt(block);
+                previous_block = encrypted;
+
+                // Output hex
+                std::cout << uint64ToHex(encrypted);
+            }
+            std::cout << std::endl;
+        } else {
+            // Get IV
+            std::cout << "Enter IV (hex): ";
+            std::string ivStr;
+            std::getline(std::cin, ivStr);
+            
+            uint64_t iv = hexToUint64(ivStr);
+
+            std::string input;
+            std::cout << "Enter ciphertext (hex): ";
+            std::getline(std::cin, input);
+
+            std::string decryptedText;
+            uint64_t previous_block = iv;
+
+            for (size_t pos = 0; pos < input.length(); pos += 16) {
+                uint64_t block = hexToUint64(input.substr(pos, 16));
+
+                uint64_t decrypted = tdes.decrypt(block);
+                decrypted ^= previous_block;  // CBC mode
+                previous_block = block;
+                
+                // Convert to text
+                for (int i = 0; i < 8; i++) {
+                    char c = (decrypted >> (56 - 8 * i)) & 0xFF;
+                    decryptedText += c;
+                }
+            }
+
+            // Remove padding
+            try {
+                decryptedText = removePadding(decryptedText);
+            } catch (const std::runtime_error& e) {
+                std::cerr << "Error: " << e.what() << std::endl;
+                return 1;
+            }
+            std::cout << "Decrypted text: " << decryptedText << std::endl;
+        }
     } else if (type == 'f') {
-        processFile(encrypt);
-    } else {
-        std::cerr << "Invalid input type!" << std::endl;
+        // Hardcoded keys for testing
+        uint64_t key1 = 0x133457799BBCDFF1;
+        uint64_t key2 = 0x233457799BBCDFF2;
+        uint64_t key3 = 0x333457799BBCDFF3;
+        
+        TripleDES tdes(key1, key2, key3);
+
+        std::string inputFile, outputFile;
+        std::cout << "Enter input file path: ";
+        std::cin >> inputFile;
+        std::cout << "Enter output file path: ";
+        std::cin >> outputFile;
+
+        FILE* inFile = fopen(inputFile.c_str(), "rb");
+        FILE* outFile = fopen(outputFile.c_str(), "wb");
+
+        if (!inFile || !outFile) {
+            std::cout << "Error opening files!" << std::endl;
+            if (inFile) fclose(inFile);
+            if (outFile) fclose(outFile);
+            return 1;
+        }
+
+        unsigned char buffer[8];
+        size_t bytesRead;
+        
+        while ((bytesRead = fread(buffer, 1, 8, inFile)) > 0) {
+            if (bytesRead < 8) {
+                for (size_t i = bytesRead; i < 8; i++) {
+                    buffer[i] = 0;
+                }
+            }
+
+            uint64_t block = 0;
+            for (int i = 0; i < 8; i++) {
+                block = (block << 8) | buffer[i];
+            }
+
+            uint64_t processed = (mode == 'e') ? tdes.encrypt(block) : tdes.decrypt(block);
+
+            for (int i = 7; i >= 0; i--) {
+                buffer[i] = processed & 0xFF;
+                processed >>= 8;
+            }
+
+            fwrite(buffer, 1, 8, outFile);
+        }
+
+        fclose(inFile);
+        fclose(outFile);
+        std::cout << "File processed successfully!" << std::endl;
     }
 
     return 0;
