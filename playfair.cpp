@@ -2,39 +2,59 @@
 #include <string>
 #include <vector>
 #include <cctype>
+#include <fstream>
 
 using namespace std;
 
 //generate playfair matrix keyword
 void createPlayfairMatrix(const string &keyword, vector<vector<char>> &matrix) {
-    bool used[26] = {false}; //track characters already used in matrix
-    used['J' - 'A'] = true; 
+    // First verify matrix dimensions
+    if (matrix.size() != 5 || matrix[0].size() != 5) {
+        throw runtime_error("Matrix must be 5x5");
+    }
+
+    // Initialize used array
+    bool used[26] = {false};
+    used['J' - 'A'] = true;  // 'J' is typically omitted in Playfair cipher
+    
+    // Clear the matrix first
+    for (int i = 0; i < 5; i++) {
+        for (int j = 0; j < 5; j++) {
+            matrix[i][j] = ' ';
+        }
+    }
+
     int row = 0, col = 0;
 
-    //create matrix using keyword
+    // Process keyword
     for (char ch : keyword) {
         if (isalpha(ch)) {
             ch = toupper(ch);
+            if (ch == 'J') ch = 'I';  // Replace J with I
             if (!used[ch - 'A']) {
-                matrix[row][col] = ch;
-                used[ch - 'A'] = true;
-                col++;
-                if (col == 5) {
-                    col = 0;
-                    row++;
+                if (row < 5 && col < 5) {  // Bounds checking
+                    matrix[row][col] = ch;
+                    used[ch - 'A'] = true;
+                    col++;
+                    if (col == 5) {
+                        col = 0;
+                        row++;
+                    }
                 }
             }
         }
     }
 
-    //fill remaining spots
+    // Fill remaining spots
     for (char ch = 'A'; ch <= 'Z'; ++ch) {
-        if (!used[ch - 'A']) {
-            matrix[row][col] = ch;
-            col++;
-            if (col == 5) {
-                col = 0;
-                row++;
+        if (!used[ch - 'A'] && ch != 'J') {  // Skip J
+            if (row < 5 && col < 5) {  // Bounds checking
+                matrix[row][col] = ch;
+                col++;
+                if (col == 5) {
+                    col = 0;
+                    row++;
+                }
             }
         }
     }
@@ -59,6 +79,18 @@ string preprocessText(const string &text) {
 
 //find position of a character in matrix
 pair<int, int> findPosition(char ch, const vector<vector<char>> &matrix) {
+    // Convert J to I as per Playfair cipher rules
+    if (ch == 'J') ch = 'I';
+    
+    // Ensure character is uppercase
+    ch = toupper(ch);
+    
+    // Verify the matrix dimensions first
+    if (matrix.size() != 5 || matrix[0].size() != 5) {
+        throw runtime_error("Invalid matrix dimensions in findPosition");
+    }
+    
+    // Search for the character
     for (int i = 0; i < 5; ++i) {
         for (int j = 0; j < 5; ++j) {
             if (matrix[i][j] == ch) {
@@ -66,7 +98,9 @@ pair<int, int> findPosition(char ch, const vector<vector<char>> &matrix) {
             }
         }
     }
-    return {-1, -1};
+    
+    // If character not found, throw an exception
+    throw runtime_error("Character '" + string(1, ch) + "' not found in Playfair matrix");
 }
 
 //encrypt plaintext
@@ -131,40 +165,110 @@ string decrypt(const string &ciphertext, const vector<vector<char>> &matrix) {
     return plaintext;
 }
 
+// Read content from a file
+string readFromFile(const string& filepath) {
+    ifstream inFile(filepath);
+    string content;
+    string line;
+    
+    if (!inFile) {
+        throw runtime_error("Unable to open input file: " + filepath + 
+                          "\nPlease ensure you provide the complete file path (e.g., D:\\folder\\file.txt)");
+    }
+    
+    while (getline(inFile, line)) {
+        content += line + "\n";
+    }
+    
+    inFile.close();
+    return content;
+}
+
+// Write content to a file
+void writeToFile(const string& filepath, const string& content) {
+    ofstream outFile(filepath);
+    
+    if (!outFile) {
+        throw runtime_error("Unable to open output file: " + filepath + 
+                          "\nPlease ensure you provide the complete file path (e.g., D:\\folder\\file.txt)");
+    }
+    
+    outFile << content;
+    outFile.close();
+}
+
 int main() {
-    string keyword, text;
-    int choice;
-
+    string keyword;
+    int choice, inputMethod;
+    
+    // Initialize the matrix first
+    vector<vector<char>> matrix(5, vector<char>(5));
+    
     cout << "Enter keyword: ";
-    cin >> keyword;
-
+    getline(cin, keyword);  // Changed to getline to handle multi-word keywords
+    
+    // Create the matrix immediately after getting the keyword
+    createPlayfairMatrix(keyword, matrix);
+    
     cout << "Choose operation:\n";
     cout << "1. Encrypt\n";
     cout << "2. Decrypt\n";
     cout << "Enter choice (1 or 2): ";
     cin >> choice;
-    cin.ignore();
-
-    cout << "Enter text: ";
-    getline(cin, text);
-
-    //create the cipher matrix
-    vector<vector<char>> matrix(5, vector<char>(5));
-    createPlayfairMatrix(keyword, matrix);
-
-    if (choice == 1) {
-        //encryption
-        string preprocessedText = preprocessText(text);
-        string encryptedText = encrypt(preprocessedText, matrix);
-        cout << "Encrypted text: " << encryptedText << endl;
-    } else if (choice == 2) {
-        //decryption
-        string preprocessedText = preprocessText(text);
-        string decryptedText = decrypt(preprocessedText, matrix);
-        cout << "Decrypted text: " << decryptedText << endl;
-    } else {
-        cout << "Invalid choice!" << endl;
+    
+    cout << "\nChoose input method:\n";
+    cout << "1. Console input\n";
+    cout << "2. File input\n";
+    cout << "Enter choice (1 or 2): ";
+    cin >> inputMethod;
+    cin.ignore();  // Clear the newline character
+    
+    string text;
+    string inputFilename, outputFilename;
+    
+    try {
+        if (inputMethod == 1) {
+            cout << "Enter text: ";
+            getline(cin, text);
+        } else if (inputMethod == 2) {
+            cout << "Enter complete input file path (e.g., D:\\folder\\input.txt): ";
+            getline(cin, inputFilename);
+            cout << "Enter complete output file path (e.g., D:\\folder\\output.txt): ";
+            getline(cin, outputFilename);
+            
+            // Read the input file
+            text = readFromFile(inputFilename);
+        } else {
+            throw runtime_error("Invalid input method selected");
+        }
+        
+        // Process the text
+        string result;
+        if (choice == 1) {
+            string preprocessedText = preprocessText(text);
+            result = encrypt(preprocessedText, matrix);
+            cout << "Text encrypted successfully!" << endl;
+        } else if (choice == 2) {
+            string preprocessedText = preprocessText(text);
+            result = decrypt(preprocessedText, matrix);
+            cout << "Text decrypted successfully!" << endl;
+        } else {
+            throw runtime_error("Invalid operation choice");
+        }
+        
+        // Output the result
+        if (inputMethod == 1) {
+            cout << "Result: " << result << endl;
+        } else {
+            // Write to output file
+            writeToFile(outputFilename, result);
+            cout << "Result written to " << outputFilename << endl;
+        }
     }
-
+    catch (const exception& e) {
+        cerr << "Error: " << e.what() << endl;
+        return 1;
+    }
+    
     return 0;
 }
