@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <cstdint>
+#include <fstream>
 
 // DES tables
 const int IP[64] = {
@@ -130,6 +131,24 @@ const int S[8][4][16] = {
         {2, 1, 14, 7, 4, 10, 8, 13, 15, 12, 9, 0, 3, 5, 6, 11}
     }
 };
+
+std::vector<uint8_t> readFile(const std::string& filename) {
+    std::ifstream file(filename, std::ios::binary);
+    if (!file) {
+        std::cerr << "Error opening file: " << filename << "\n";
+        exit(1);
+    }
+    std::vector<uint8_t> data((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    return data;
+}
+void writeFile(const std::string& filename, const std::vector<uint8_t>& data) {
+    std::ofstream file(filename, std::ios::binary);
+    if (!file) {
+        std::cerr << "Error writing to file: " << filename << "\n";
+        exit(1);
+    }
+    file.write(reinterpret_cast<const char*>(data.data()), data.size());
+}
 
 // Generate a random 64-bit block (IV or part of the key)
 uint64_t generateRandomBlock() {
@@ -290,6 +309,7 @@ std::vector<uint8_t> decrypt3DES(const std::vector<uint8_t>& ciphertext, uint64_
     return plaintext;
 }
 
+
 int main() {
     srand(static_cast<unsigned>(time(nullptr)));
 
@@ -300,7 +320,6 @@ int main() {
 
     std::cin.ignore(); // Ignore newline after mode input
 
-    // Prompt for keys
     std::cout << "Enter Key 1 (16 hex characters, e.g., 0123456789ABCDEF): ";
     std::string key1Hex;
     std::getline(std::cin, key1Hex);
@@ -319,16 +338,25 @@ int main() {
     }
     uint64_t key2 = std::stoull(key2Hex, nullptr, 16);
 
+    // Choose between text or file input
+    std::cout << "Select input type: (t) Text, (f) File: ";
+    char inputType;
+    std::cin >> inputType;
+
+    std::cin.ignore(); // Ignore newline after input type
+
     if (mode == 'e') {
-        // Encryption
-        std::cout << "Enter plaintext: ";
-        std::string plaintext;
-        std::getline(std::cin, plaintext);
+        // Encryption mode
+        if (inputType == 't') {
+            // Text input
+            std::cout << "Enter plaintext: ";
+            std::string plaintext;
+            std::getline(std::cin, plaintext);
 
-        // Generate random IV
-        uint64_t iv = generateRandomBlock();
+            // Generate random IV
+            uint64_t iv = generateRandomBlock();
 
-        // Encrypt
+            // Encrypt
         auto paddedData = pad(textToBytes(plaintext), 8);
         auto ciphertext = encrypt3DES(paddedData, key1, key2, iv);
 
@@ -338,31 +366,87 @@ int main() {
             std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)byte;
         }
         std::cout << "\nIV (Hex): " << std::hex << iv << "\n";
+        
+        } else if (inputType == 'f') {
+            // File input
+            std::cout << "Enter the absolute path to the file to encrypt: ";
+            std::string filename;
+            std::getline(std::cin, filename);
 
-    } else if (mode == 'd') {
-        // Decryption
-        std::cout << "Enter IV (Hex): ";
-        std::string ivHex;
-        std::getline(std::cin, ivHex);
-        uint64_t iv = std::stoull(ivHex, nullptr, 16);
+            // Read file data
+            std::vector<uint8_t> data = readFile(filename);
 
-        std::cout << "Enter ciphertext (Hex): ";
-        std::string ciphertextHex;
-        std::getline(std::cin, ciphertextHex);
+            // Generate random IV
+            uint64_t iv = generateRandomBlock();
 
-        // Convert ciphertext from Hex to binary
-        std::vector<uint8_t> ciphertext;
-        for (size_t i = 0; i < ciphertextHex.length(); i += 2) {
-            ciphertext.push_back(static_cast<uint8_t>(std::stoi(ciphertextHex.substr(i, 2), nullptr, 16)));
+            // Encrypt
+            auto encryptedData = encrypt3DES(data, key1, key2, iv);
+
+            // Output encrypted data to a file
+            std::string encryptedFilename = filename + ".enc";
+            writeFile(encryptedFilename, encryptedData);
+
+            // Output the IV for decryption
+            std::cout << "Encrypted file: " << encryptedFilename << "\n";
+            std::cout << "IV (Hex): " << std::hex << iv << "\n";
+        } else {
+            std::cerr << "Invalid input type selected.\n";
         }
 
-        // Decrypt
-        auto decryptedData = decrypt3DES(ciphertext, key1, key2, iv);
-        auto plaintext = bytesToText(unpad(decryptedData));
+    } else if (mode == 'd') {
+        // Decryption mode
+        if (inputType == 't') {
+            // Text input
+            std::cout << "Enter ciphertext (Hex): ";
+            std::string ciphertextHex;
+            std::getline(std::cin, ciphertextHex);
 
-        // Output
-        std::cout << "Decrypted text: " << plaintext << "\n";
+            // Convert ciphertext from Hex to binary
+            std::vector<uint8_t> ciphertext;
+            for (size_t i = 0; i < ciphertextHex.length(); i += 2) {
+                ciphertext.push_back(static_cast<uint8_t>(std::stoi(ciphertextHex.substr(i, 2), nullptr, 16)));
+            }
 
+            // Enter IV
+            std::cout << "Enter IV (Hex): ";
+            std::string ivHex;
+            std::getline(std::cin, ivHex);
+            uint64_t iv = std::stoull(ivHex, nullptr, 16);
+
+            // Decrypt
+            auto decryptedData = decrypt3DES(ciphertext, key1, key2, iv);
+            auto plaintext = bytesToText(unpad(decryptedData));
+
+            // Output decrypted text
+            std::cout << "Decrypted text: " << plaintext << "\n";
+
+        } else if (inputType == 'f') {
+            // File input
+            std::cout << "Enter the absolute path to the encrypted file: ";
+            std::string encryptedFilename;
+            std::getline(std::cin, encryptedFilename);
+
+            // Read encrypted file data
+            std::vector<uint8_t> encryptedData = readFile(encryptedFilename);
+
+            // Enter IV
+            std::cout << "Enter IV (Hex): ";
+            std::string ivHex;
+            std::getline(std::cin, ivHex);
+            uint64_t iv = std::stoull(ivHex, nullptr, 16);
+
+            // Decrypt
+            auto decryptedData = decrypt3DES(encryptedData, key1, key2, iv);
+
+            // Output decrypted data to a file
+            std::string decryptedFilename = encryptedFilename + ".dec";
+            writeFile(decryptedFilename, decryptedData);
+
+            std::cout << "Decrypted file: " << decryptedFilename << "\n";
+
+        } else {
+            std::cerr << "Invalid input type selected.\n";
+        }
     } else {
         std::cerr << "Invalid mode selected.\n";
     }
