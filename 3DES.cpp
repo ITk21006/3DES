@@ -1,14 +1,14 @@
-#include <iostream>
-#include <string>
-#include <vector>
-#include <sstream>
-#include <iomanip>
-#include <cstdlib>
-#include <ctime>
-#include <cstdint>
-#include <fstream>
+#include <iostream> // for input/output
+#include <string> // for strings
+#include <vector> // for vectors
+#include <sstream> // for string streams
+#include <iomanip> // for input/output manipulation
+#include <cstdlib> // for standard library functions
+#include <ctime> // for time functions
+#include <cstdint> // for fixed-width integer types
+#include <fstream> // for files
 
-// DES tables
+//tables
 const int IP[64] = {
     58, 50, 42, 34, 26, 18, 10, 2,
     60, 52, 44, 36, 28, 20, 12, 4,
@@ -150,7 +150,7 @@ void writeFile(const std::string& filename, const std::vector<uint8_t>& data) {
     file.write(reinterpret_cast<const char*>(data.data()), data.size());
 }
 
-// Generate a random 64-bit block (IV or part of the key)
+//for IV generation
 uint64_t generateRandomBlock() {
     uint64_t block = 0;
     for (int i = 0; i < 8; ++i) {
@@ -159,7 +159,7 @@ uint64_t generateRandomBlock() {
     return block;
 }
 
-// Permutation function
+//permutation
 uint64_t permute(uint64_t input, const int* table, int size) {
     uint64_t output = 0;
     for (int i = 0; i < size; ++i) {
@@ -168,7 +168,7 @@ uint64_t permute(uint64_t input, const int* table, int size) {
     return output;
 }
 
-// Left circular shift
+//left shift
 uint32_t leftShift(uint32_t value, int shifts) {
     return ((value << shifts) | (value >> (28 - shifts))) & 0x0FFFFFFF;
 }
@@ -195,7 +195,7 @@ uint64_t desRound(uint64_t block, uint64_t subkey) {
     uint64_t expanded = permute(right, E, 48);
     uint64_t xored = expanded ^ subkey;
 
-    // Apply S-Boxes
+    //apply S-Boxes
     uint32_t sboxOutput = 0;
     for (int i = 0; i < 8; ++i) {
         int row = ((xored >> (42 - i * 6)) & 0x20) | ((xored >> (42 - i * 6)) & 0x01);
@@ -203,12 +203,12 @@ uint64_t desRound(uint64_t block, uint64_t subkey) {
         sboxOutput = (sboxOutput << 4) | S[i][row][col];
     }
 
-    // Apply P-Box
+    //apply P-Box
     uint32_t permuted = permute(sboxOutput, P, 32);
     return (static_cast<uint64_t>(right) << 32) | (left ^ permuted);
 }
 
-// Perform DES encryption or decryption
+//DES encryption/decryption
 uint64_t des(uint64_t block, uint64_t key, bool decrypt) {
     uint64_t subkeys[16];
     generateSubkeys(key, subkeys);
@@ -221,7 +221,7 @@ uint64_t des(uint64_t block, uint64_t key, bool decrypt) {
     return permute(block, IP_INV, 64);
 }
 
-// Padding for CBC mode (PKCS5)
+//PKCS5 padding
 std::vector<uint8_t> pad(const std::vector<uint8_t>& data, size_t blockSize) {
     size_t paddingSize = blockSize - (data.size() % blockSize);
     std::vector<uint8_t> padded = data;
@@ -229,80 +229,80 @@ std::vector<uint8_t> pad(const std::vector<uint8_t>& data, size_t blockSize) {
     return padded;
 }
 
-// Unpadding for CBC mode (PKCS5)
+//unpadding
 std::vector<uint8_t> unpad(const std::vector<uint8_t>& data) {
     size_t paddingSize = data.back();
     return std::vector<uint8_t>(data.begin(), data.end() - paddingSize);
 }
 
-// Convert text to a vector of bytes
+//convert text to bytes
 std::vector<uint8_t> textToBytes(const std::string& text) {
     return std::vector<uint8_t>(text.begin(), text.end());
 }
 
-// Convert vector of bytes to text
+//convert bytes to text
 std::string bytesToText(const std::vector<uint8_t>& bytes) {
     return std::string(bytes.begin(), bytes.end());
 }
 
-// Encrypt using 3DES in CBC mode
+//encrypt using 3DES (CBC mode)
 std::vector<uint8_t> encrypt3DES(const std::vector<uint8_t>& plaintext, uint64_t key1, uint64_t key2, uint64_t iv) {
     std::vector<uint8_t> ciphertext;
     uint64_t previousBlock = iv;
 
     for (size_t i = 0; i < plaintext.size(); i += 8) {
-        // Extract 8-byte (64-bit) block from plaintext
+        //extract 8-byte block from plaintext
         uint64_t block = 0;
         for (size_t j = 0; j < 8 && i + j < plaintext.size(); ++j) {
             block = (block << 8) | plaintext[i + j];
         }
 
-        // Apply CBC mode: XOR with the previous ciphertext block
+        //apply CBC mode (XOR with the previous ciphertext block)
         block ^= previousBlock;
 
-        // Encrypt using 3DES (Encrypt -> Decrypt -> Encrypt)
-        block = des(block, key1, false); // Encrypt with key1
-        block = des(block, key2, true);  // Decrypt with key2
-        block = des(block, key1, false); // Encrypt with key1 again
+        //encrypt using two key 3DES
+        block = des(block, key1, false); //encrypt with key1
+        block = des(block, key2, true);  //decrypt with key2
+        block = des(block, key1, false); //encrypt with key1 again
 
-        // Append encrypted block to ciphertext
+        //append encrypted block to ciphertext
         for (int j = 7; j >= 0; --j) {
             ciphertext.push_back((block >> (j * 8)) & 0xFF);
         }
 
-        // Update previous block for the next iteration
+        //update previous block for next iteration
         previousBlock = block;
     }
 
     return ciphertext;
 }
 
-// Decrypt using 3DES in CBC mode
+//decrypt using 3DES (CBC mode)
 std::vector<uint8_t> decrypt3DES(const std::vector<uint8_t>& ciphertext, uint64_t key1, uint64_t key2, uint64_t iv) {
     std::vector<uint8_t> plaintext;
     uint64_t previousBlock = iv;
 
     for (size_t i = 0; i < ciphertext.size(); i += 8) {
-        // Extract 8-byte (64-bit) block from ciphertext
+        //extract 8-byte block from plaintext
         uint64_t block = 0;
         for (size_t j = 0; j < 8 && i + j < ciphertext.size(); ++j) {
             block = (block << 8) | ciphertext[i + j];
         }
 
-        // Decrypt using 3DES (Decrypt -> Encrypt -> Decrypt)
-        uint64_t decryptedBlock = des(block, key1, true);  // Decrypt with key1
-        decryptedBlock = des(decryptedBlock, key2, false); // Encrypt with key2
-        decryptedBlock = des(decryptedBlock, key1, true);  // Decrypt with key1 again
+        //decrypt using two key 3DES
+        uint64_t decryptedBlock = des(block, key1, true);  //decrypt with key1
+        decryptedBlock = des(decryptedBlock, key2, false); //encrypt with key2
+        decryptedBlock = des(decryptedBlock, key1, true);  //decrypt with key1 again
 
-        // Apply CBC mode: XOR with the previous ciphertext block
+        //apply CBC mode (XOR with the previous ciphertext block)
         decryptedBlock ^= previousBlock;
 
-        // Append decrypted block to plaintext
+        //append decrypted block to plaintext
         for (int j = 7; j >= 0; --j) {
             plaintext.push_back((decryptedBlock >> (j * 8)) & 0xFF);
         }
 
-        // Update previous block for the next iteration
+        //update previous block for next iteration
         previousBlock = block;
     }
 
@@ -313,144 +313,154 @@ std::vector<uint8_t> decrypt3DES(const std::vector<uint8_t>& ciphertext, uint64_
 int main() {
     srand(static_cast<unsigned>(time(nullptr)));
 
-    std::cout << "3DES Encryption/Decryption\n";
-    std::cout << "Select mode: (e) Encrypt, (d) Decrypt: ";
     char mode;
-    std::cin >> mode;
+    while (true) {
+        std::cout << "Select mode - (e) Encrypt, (d) Decrypt\n";
+        std::cout << "Enter mode: ";
+        std::cin >> mode;
+        if (mode == 'e' || mode == 'd') break;
+        std::cerr << "Invalid mode selected. Please enter 'e' for Encrypt or 'd' for Decrypt.\n";
+    }
+    std::cin.ignore(); //ignore newline after mode input
 
-    std::cin.ignore(); // Ignore newline after mode input
+    char inputType;
+    while (true) {
+        std::cout << "Select input type - (t) Text, (f) File\n";
+        std::cout << "Enter mode: ";
+        std::cin >> inputType;
+        if (inputType == 't' || inputType == 'f') break;
+        std::cerr << "Invalid input type selected. Please enter 't' for Text or 'f' for File.\n";
+    }
+    std::cin.ignore(); //ignore newline after input type
 
-    std::cout << "Enter Key 1 (16 hex characters, e.g., 0123456789ABCDEF): ";
     std::string key1Hex;
-    std::getline(std::cin, key1Hex);
-    if (key1Hex.length() != 16) {
+    while (true) {
+        std::cout << "Enter Key 1 (16 hex characters): ";
+        std::getline(std::cin, key1Hex);
+        if (key1Hex.length() == 16) break;
         std::cerr << "Key 1 must be 16 hexadecimal characters!\n";
-        return 1;
     }
     uint64_t key1 = std::stoull(key1Hex, nullptr, 16);
 
-    std::cout << "Enter Key 2 (16 hex characters, e.g., FEDCBA9876543210): ";
     std::string key2Hex;
-    std::getline(std::cin, key2Hex);
-    if (key2Hex.length() != 16) {
+    while (true) {
+        std::cout << "Enter Key 2 (16 hex characters): ";
+        std::getline(std::cin, key2Hex);
+        if (key2Hex.length() == 16) break;
         std::cerr << "Key 2 must be 16 hexadecimal characters!\n";
-        return 1;
     }
     uint64_t key2 = std::stoull(key2Hex, nullptr, 16);
 
-    // Choose between text or file input
-    std::cout << "Select input type: (t) Text, (f) File: ";
-    char inputType;
-    std::cin >> inputType;
 
-    std::cin.ignore(); // Ignore newline after input type
 
     if (mode == 'e') {
-        // Encryption mode
+        //encryption mode
         if (inputType == 't') {
-            // Text input
+            //text input
             std::cout << "Enter plaintext: ";
             std::string plaintext;
             std::getline(std::cin, plaintext);
 
-            // Generate random IV
+            //generate random IV
             uint64_t iv = generateRandomBlock();
 
-            // Encrypt
-        auto paddedData = pad(textToBytes(plaintext), 8);
-        auto ciphertext = encrypt3DES(paddedData, key1, key2, iv);
+            //encrypt
+            auto paddedData = pad(textToBytes(plaintext), 8);
+            auto ciphertext = encrypt3DES(paddedData, key1, key2, iv);
 
-        // Output
-        std::cout << "Ciphertext (Hex): ";
-        for (auto byte : ciphertext) {
-            std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)byte;
-        }
-        std::cout << "\nIV (Hex): " << std::hex << iv << "\n";
+            //output
+            std::cout << "Ciphertext (Hex): ";
+            for (auto byte : ciphertext) {
+                std::cout << std::hex << std::setw(2) << std::setfill('0') << (int)byte;
+            }
+            std::cout << "\nIV (Hex): " << std::hex << iv << "\n";
         
         } else if (inputType == 'f') {
-            // File input
-            std::cout << "Enter the absolute path to the file to encrypt: ";
+            //file input
+            std::cout << "Enter absolute path to file: ";
             std::string filename;
             std::getline(std::cin, filename);
 
-            // Read file data
+            //read file data
             std::vector<uint8_t> data = readFile(filename);
 
-            // Generate random IV
+            //generate random IV
             uint64_t iv = generateRandomBlock();
 
-            // Encrypt
+            //encrypt
             auto encryptedData = encrypt3DES(data, key1, key2, iv);
 
-            // Output encrypted data to a file
+            //output encrypted data to a file
             std::string encryptedFilename = filename + ".enc";
             writeFile(encryptedFilename, encryptedData);
 
-            // Output the IV for decryption
+            //output IV
             std::cout << "Encrypted file: " << encryptedFilename << "\n";
             std::cout << "IV (Hex): " << std::hex << iv << "\n";
-        } else {
-            std::cerr << "Invalid input type selected.\n";
         }
 
     } else if (mode == 'd') {
-        // Decryption mode
+        //decryption mode
         if (inputType == 't') {
-            // Text input
+            //text input
             std::cout << "Enter ciphertext (Hex): ";
             std::string ciphertextHex;
             std::getline(std::cin, ciphertextHex);
 
-            // Convert ciphertext from Hex to binary
+            //convert ciphertext from hex to binary
             std::vector<uint8_t> ciphertext;
             for (size_t i = 0; i < ciphertextHex.length(); i += 2) {
                 ciphertext.push_back(static_cast<uint8_t>(std::stoi(ciphertextHex.substr(i, 2), nullptr, 16)));
             }
 
-            // Enter IV
-            std::cout << "Enter IV (Hex): ";
+            //IV input
             std::string ivHex;
-            std::getline(std::cin, ivHex);
+            while (true) {
+                std::cout << "Enter IV (Hex): ";
+                std::getline(std::cin, ivHex);
+                if (ivHex.length() == 16) break;
+                std::cerr << "IV must be 16 hexadecimal characters!\n";
+            }
             uint64_t iv = std::stoull(ivHex, nullptr, 16);
 
-            // Decrypt
+            //decrypt
             auto decryptedData = decrypt3DES(ciphertext, key1, key2, iv);
             auto plaintext = bytesToText(unpad(decryptedData));
 
-            // Output decrypted text
+            //output decrypted text
             std::cout << "Decrypted text: " << plaintext << "\n";
 
         } else if (inputType == 'f') {
-            // File input
-            std::cout << "Enter the absolute path to the encrypted file: ";
+            //file input
+            std::cout << "Enter absolute path to file: ";
             std::string encryptedFilename;
             std::getline(std::cin, encryptedFilename);
 
-            // Read encrypted file data
+            //read encrypted file data
             std::vector<uint8_t> encryptedData = readFile(encryptedFilename);
 
-            // Enter IV
-            std::cout << "Enter IV (Hex): ";
+            //IV input
             std::string ivHex;
-            std::getline(std::cin, ivHex);
+            while (true) {
+                std::cout << "Enter IV (Hex): ";
+                std::getline(std::cin, ivHex);
+                if (ivHex.length() == 16) break;
+                std::cerr << "IV must be 16 hexadecimal characters!\n";
+            }
             uint64_t iv = std::stoull(ivHex, nullptr, 16);
 
-            // Decrypt
+            //decrypt
             auto decryptedData = decrypt3DES(encryptedData, key1, key2, iv);
 
-            // Output decrypted data to a file
+            //output decrypted data to a file (remove .dec.enc extensions)
+            //outputted file should be in the same place where the encrypted file is
             std::string decryptedFilename = encryptedFilename + ".dec";
             writeFile(decryptedFilename, decryptedData);
 
             std::cout << "Decrypted file: " << decryptedFilename << "\n";
-
-        } else {
-            std::cerr << "Invalid input type selected.\n";
+            std::cout << "Remove .enc.dec extensions before opening the file.\n";
         }
-    } else {
-        std::cerr << "Invalid mode selected.\n";
     }
 
     return 0;
 }
-
